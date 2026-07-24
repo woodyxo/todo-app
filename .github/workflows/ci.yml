@@ -1,0 +1,95 @@
+# .github/workflows/ci.yml
+# Pipeline de integração contínua: lint, testes e build da imagem Docker
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    env:
+      POSTGRES_DB: todo
+      POSTGRES_USER: postgres_user
+      POSTGRES_PASSWORD: postgres_pass
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      SECRET_KEY: chave-secreta-apenas-para-ci-nao-usar-em-producao
+      DEBUG: "True"
+      ALLOWED_HOSTS: "localhost,127.0.0.1"
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: todo
+          POSTGRES_USER: postgres_user
+          POSTGRES_PASSWORD: postgres_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Faz checkout do código
+        uses: actions/checkout@v4
+
+      - name: Instala o uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Instala as dependências do backend
+        run: uv sync
+        working-directory: backend
+
+      - name: Verifica o estilo do código com ruff
+        run: uv run ruff check .
+        working-directory: backend
+
+      - name: Verifica a configuração do Django
+        run: uv run python manage.py check
+        working-directory: backend
+
+      - name: Verifica se as migrations estão sincronizadas com os models
+        run: uv run python manage.py makemigrations --check --dry-run
+        working-directory: backend
+
+      - name: Aplica as migrations no banco de dados
+        run: uv run python manage.py migrate
+        working-directory: backend
+
+      - name: Executa os testes automatizados
+        run: uv run pytest
+        working-directory: backend
+
+  build-and-push:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Faz checkout do código
+        uses: actions/checkout@v4
+
+      - name: Autentica no GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Constrói e publica a imagem do backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: ghcr.io/${{ github.repository }}/backend:latest

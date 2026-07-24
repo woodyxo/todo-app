@@ -1,1 +1,1 @@
-/mnt/c/MCI-05-provisionamento-de-aplicacoes
+cd /mnt/c/MCI-05-provisionamento-de-aplicacoes
